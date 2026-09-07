@@ -3,6 +3,7 @@
 #-Wextra 和 -pedantic 会触发更多警告。
 CC = gcc
 CFLAGS = -Wall -Wextra -pedantic -std=c99
+all: demo kilo
 demo: demo.c
 	$(CC) $(CFLAGS) demo.c -o demo
 kilo: kilo.C

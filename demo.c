@@ -1,8 +1,8 @@
-#include<stdio.h>
-#include<termios.h>
-int main()
-{
-    int name;
- printf(name);
- return 0;
-}
+    #include<stdio.h>
+    #include<termios.h>
+    int main()
+    {
+        int name=1;
+        printf("%d",name);
+        return 0;
+    }
