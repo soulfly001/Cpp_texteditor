@@ -22,6 +22,7 @@
 void editorMoveCursor(int  key); 
 void editorRefreshScreen();
 void editorSetStatusMessage(const char* fmt,...);
+char *editorPrompt(char *prompt);
 /*             data        */
 typedef struct erow
 {
@@ -287,7 +288,13 @@ char* editorRowsToString(int* buflen){
 }
 /// @brief 保存文件到磁盘
 void editorSave(){
-    if(E.filename==NULL)return;
+    if(E.filename==NULL){
+        E.filename=editorPrompt("Save as: %s(ESC to cancel)");
+        if(E.filename==NULL){
+            editorSetStatusMessage("save aborted");
+            return;
+        }
+    }
     int len;
     char* buf=editorRowsToString(&len); 
     // 打开文件：
@@ -423,6 +430,43 @@ int editorReadKey(){
     }
     else{
         return c;
+    }  
+}
+/// @brief 回显用户的键盘输入
+/// @param prompt 键盘输入
+/// @return 
+char* editorPrompt(char* prompt){
+    size_t buffsize=128;
+    char* buf=malloc(buffsize);
+    size_t buflen=0;
+    while (1)
+    {
+        editorSetStatusMessage(prompt,buf);//buf ->%s
+        editorRefreshScreen();
+        int c=editorReadKey();
+        if(c==DEL_KEY||c==CTRL_KEY('h')||c==BACKSPACE){
+            if(buflen!=0)buf[--buflen]='\0';
+        }else if(c=='\x1b'){
+            editorSetStatusMessage("");
+            free(buf);
+            return NULL;
+        }
+        else if(c=='\r'){
+            if (buflen!=0)
+            {
+                editorSetStatusMessage("");
+                return buf;
+            }
+        } else if (!iscntrl(c)&&c<128)
+            {
+                if (buflen==buffsize-1)
+                {
+                    buffsize*=2;
+                    buf=realloc(buf,buffsize);
+                }
+                buf[buflen++]=c;
+                buf[buflen]='\0';
+            }
     }  
 }
 
