@@ -17,9 +17,12 @@
 #define CTRL_KEY(k) ((k)& 0x1f) //get low 5bit ,changed "ctrl + k"
 #define KILO_VERSION "0.0.1"
 #define KILO_TAB_STOP 8
-/*function declare*/
+#define KILO_QUIT_TIMES 3
+/*function Prototype*/
 void editorMoveCursor(int  key); 
 void editorRefreshScreen();
+void editorSetStatusMessage(const char* fmt,...);
+/*             data        */
 typedef struct erow
 {
     int size;
@@ -58,6 +61,7 @@ struct editConfig
     char* filename;
     char statusmsg[80];
     time_t statusmsg_time;
+    int dirty; // file modify and no save bit
     int cx,cy;//cursor position cx光标在字符数组中的逻辑索引/下标
 };
 struct editConfig E;
@@ -125,9 +129,14 @@ void editorUpdateRow(erow* row){
     row->render[idx]='\0';
     row->rsize=idx;
 }
-void editorAppendRow(char *s,size_t len){
+/// @brief 在指定的行索引处插入一行新的文本
+/// @param at 要插入的位置索引
+/// @param s 要插入的字符串内容
+/// @param len 字符串的长度
+void editorInsertRow(int at,char *s,size_t len){
+    if(at<0||at>E.numrows)return;
     E.row=realloc(E.row,sizeof(erow)*(E.numrows+1));
-    int at=E.numrows;
+    memmove(&E.row[at+1],&E.row[at],sizeof(erow)*(E.numrows-at));
     E.row[at].size=len;
     E.row[at].chars =malloc(len+1);
     memcpy(E.row[at].chars,s,len);//not copy \0
@@ -136,8 +145,38 @@ void editorAppendRow(char *s,size_t len){
     E.row[at].rsize=0;
     editorUpdateRow(&E.row[at]);
     E.numrows++;
+    E.dirty++;
 }
 
+    /***       编辑操作       ***/
+
+/// @brief 释放行所持有的指针
+/// @param erow 行指针
+void editorFreeRow(erow* erow){
+    free(erow->render);
+    free(erow->chars);
+}
+/// @brief deleting a empty row!
+/// @param at row at position
+void editorDelRow(int at){
+    if(at<0||at>E.numrows) return;
+    editorFreeRow(&E.row[at]);
+    memmove(&E.row[at],&E.row[at+1],sizeof(erow)*(E.numrows-at-1));
+    E.numrows--;
+    E.dirty++;
+}
+/// @brief 行合并
+/// @param row  前一行指针
+/// @param s 被合并行的指针
+/// @param length 合并长度
+void editorRowAppendString(erow* row,char* s,size_t length){
+    row->chars=realloc(row->chars,row->size+length+1);
+    memcpy(&row->chars[row->size],s,length);
+    row->size+=length;
+    row->chars[row->size]='\0';
+    editorUpdateRow(row);
+    E.dirty++;
+}
 /// @brief 在指定行的指定位置插入一个字符
 /// @param row 插入的行
 /// @param at 插入行的位置
@@ -150,17 +189,61 @@ void editorRowInsertChar(erow* row,int at,int c){
     row->size++;
     row->chars[at]=c;
     editorUpdateRow(row);
+    E.dirty++;
 }
-/*** 编辑操作 ***/
+
 /// @brief 真正调用的插入函数
 /// @param c 插入字符
 void editorInsertChar(int c){
     if(E.cy==E.numrows){
-        editorAppendRow("",0);
+        editorInsertRow(E.numrows,"",0);
     }
     editorRowInsertChar(&E.row[E.cy],E.cx,c);
     E.cx++;
 }
+/// @brief 处理回车键，在当前光标位置插入新行（将一行拆分为两行）
+void editorInsertNewLine(){
+    if(E.cx==0){
+        editorInsertRow(E.cy,"",0);
+    }else{
+        erow* row=&E.row[E.cy];
+        editorInsertRow(E.cy+1,&row->chars[E.cx],row->size-E.cx);
+        row=&E.row[E.cy];//// 【重要】重新获取当前行指针。
+        row->size=E.cx;
+        row->chars[row->size]='\0';
+        editorUpdateRow(row);
+    }
+    E.cy++;
+    E.cx=0;
+}
+/// @brief 删除字符
+/// @param row 删除的行
+/// @param at 删除的位置
+void editorRowDelChar(erow* row,int at){
+    if(at<0||at>=row->size)return;
+    memmove(&row->chars[at],&row->chars[at+1],row->size-at);
+    row->size--;
+    editorUpdateRow(row);
+    E.dirty++;
+}
+
+/// @brief 对外删除接口
+void editorDelChar(){
+    if(E.cy==E.numrows)return;
+    if(E.cx==0 &&E.cy==0)return;
+    erow* erow=&E.row[E.cy];
+    if(E.cx>0){
+        editorRowDelChar(erow,E.cx -1);
+        E.cx--;
+    }else{
+        E.cx=E.row[E.cy-1].size;//光标移动到上一行的末尾
+        editorRowAppendString(&E.row[E.cy-1],erow->chars,erow->size);
+        editorDelRow(E.cy);
+        E.cy--;
+    }
+    
+}
+
 
 /*file i/o*/
 void editorOpen(char* filename){
@@ -175,10 +258,11 @@ void editorOpen(char* filename){
     {
         while (linelen>0 && (line[linelen-1]=='\n'||line[linelen-1]=='\r'))
         { linelen--;}
-        editorAppendRow(line,linelen);
+        editorInsertRow(E.numrows,line,linelen);
     }
     free(line);
     fclose(fp); 
+    E.dirty=0;
 }
 /// @brief 将 erow 结构数组转换为一个字符串
 /// @param buflen 字符串长度
@@ -211,10 +295,20 @@ void editorSave(){
     // - O_CREAT: 如果文件不存在则创建
     // - 0644: 文件权限（所有者读写，组和其他用户只读）
     int fd=open(E.filename,O_RDWR|O_CREAT,0644);//fd文件描述符
-    ftruncate(fd,len);  // 实际上应该先截断为 0，再写入新内容
-    write(fd,buf,len);
-    close(fd);
+    if(fd!=-1){
+        if(ftruncate(fd,len)!=-1){// 实际上应该先截断为 0，再写入新内容
+            if(write(fd,buf,len)==len){
+                    close(fd);
+                    free(buf);
+                    E.dirty=0;
+                    editorSetStatusMessage("%d bytes written to disk",len);
+                    return;
+            }
+        }
+        close(fd);
+    }
     free(buf);
+    editorSetStatusMessage("can't save I/O error:%s",strerror(errno));
 }
 /// @brief 垂直滚动控制，rowoff为偏移量指向当前文件顶部行数，cy为屏幕绝对行数
 void editorScroll(){
@@ -390,7 +484,8 @@ void editorDrawRows(struct abuf *ab) {
 void editorDrawStatusBar(struct abuf* ab){
     abAppend(ab,"\x1b[7m",4);
     char status[80],rstatus[80];
-    int len=snprintf(status,sizeof(status),"%.20s-%d lines",E.filename?E.filename:"[NO NAME]",E.numrows);
+    int len=snprintf(status,sizeof(status),"%.20s-%d lines %s",
+        E.filename?E.filename:"[NO NAME]",E.numrows,E.dirty?"(modified)":"");
     int rlen=snprintf(rstatus,sizeof(rstatus),"%d/%d",E.cy+1,E.numrows);
     if(len>E.screencols) len=E.screencols;
     abAppend(ab,status,len);
@@ -433,16 +528,27 @@ int getWindowSize(int* rows,int* cols ){
     
 }
 void editorProcessKeyPress(){
-    int c=editorReadKey();
+    static int quit_times=KILO_QUIT_TIMES;//程序运行期间，这行代码只执行一次。
+    int c=editorReadKey();//quit_times 不会销毁，它静静地待在内存的静态区，保留着当前的值。
     switch (c)
     {
     case '\r':
-        /* TODO */
+        editorInsertNewLine();
         break;
     case CTRL_KEY('o'):
+        if (E.dirty&&quit_times>0)
+        {
+            editorSetStatusMessage("WARNING!!! File has unsaved changes. "
+            "Press Ctrl-O %d more times to quit",quit_times);
+            quit_times--;
+            return;
+        }
         write(STDOUT_FILENO, "\x1b[2J", 4);
         write(STDOUT_FILENO, "\x1b[H", 3);
         exit(0);
+        break;
+    case CTRL_KEY('s'):
+        editorSave();
         break;
     case HOME_KEY:
         E.cx=0;
@@ -456,7 +562,8 @@ void editorProcessKeyPress(){
     case BACKSPACE:
     case DEL_KEY:
     case CTRL_KEY('h'):
-        /* TODO */
+        if(c==DEL_KEY)editorMoveCursor(ARROW_RIGHT);//del为删除右侧字符，先做右移再删除
+        editorDelChar();
         break;
     case PAGE_DOWN:
     case PAGE_UP:
@@ -489,6 +596,7 @@ void editorProcessKeyPress(){
         editorInsertChar(c);
         break;
     }
+    quit_times=KILO_QUIT_TIMES;
 }
 void editorRefreshScreen(){
     editorScroll();
@@ -522,6 +630,7 @@ void initEditor(){
     E.filename=NULL;
     E.statusmsg[0]='\0';
     E.statusmsg_time=0;
+    E.dirty=0;
     if(getWindowSize(&E.screenrows,&E.screencols)==-1) die("getWindowSize");
     E.screenrows-=2;
 }
@@ -575,7 +684,7 @@ int main(int argc,char* argv[])
     if(argc>1){
         editorOpen(argv[1]);
     } 
-    editorSetStatusMessage("HELP:ctrl-L=quit");
+    editorSetStatusMessage("HELP:ctrl-s=save|ctrl-o=quit");
     while (1){
         editorRefreshScreen();
         editorProcessKeyPress();
