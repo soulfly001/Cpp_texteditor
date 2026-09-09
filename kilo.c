@@ -22,7 +22,7 @@
 void editorMoveCursor(int  key); 
 void editorRefreshScreen();
 void editorSetStatusMessage(const char* fmt,...);
-char *editorPrompt(char *prompt);
+char *editorPrompt(char *prompt, void (*callback)(char *, int));
 /*             data        */
 typedef struct erow
 {
@@ -289,7 +289,7 @@ char* editorRowsToString(int* buflen){
 /// @brief 保存文件到磁盘
 void editorSave(){
     if(E.filename==NULL){
-        E.filename=editorPrompt("Save as: %s(ESC to cancel)");
+        E.filename=editorPrompt("Save as: %s(ESC to cancel)",NULL);
         if(E.filename==NULL){
             editorSetStatusMessage("save aborted");
             return;
@@ -316,6 +316,66 @@ void editorSave(){
     }
     free(buf);
     editorSetStatusMessage("can't save I/O error:%s",strerror(errno));
+}
+/*****find****/
+
+/**
+ * @brief 编辑器查找功能的回调函数，用于在文本中搜索指定的查询字符串。
+ * @param query 要搜索的目标字符串（子串）。
+ * @param key   用户当前按下的键值（ASCII 码或转义序列）。
+ */
+/*增量搜索：不需要按enter  键入一个搜一个*/
+void editorFindCallback(char* query,int key){
+    static int last_match=-1;//记录上次匹配的位置
+    static int diretion=1;//1---forward -1 backward
+    if(key=='\r'||key=='\x1b'){
+        last_match=-1;
+        diretion=1;
+        return ;
+    }else if(key==ARROW_RIGHT||key==ARROW_DOWN){
+        diretion=1;
+    }else if(key==ARROW_LEFT||key==ARROW_UP){
+        diretion=-1;
+    }else{
+        last_match=-1;
+        diretion=1;
+    }
+    if(last_match==-1)diretion=1;
+    int current=last_match; //现在匹配的位置从上一次的位置开始
+    int i;
+    for ( i = 0; i < E.numrows; i++)
+    {
+        current+=diretion;//+1从上次匹配的位置下或上一行搜索
+        if(current==-1)current=E.numrows-1;//向上搜越界
+        else if(current==E.numrows)current=0;//向下搜越界
+        erow* row=&E.row[current];
+        char* match=strstr(row->chars,query);//（主串，子串）
+        if(match){
+            last_match=current;
+            E.cy=current;
+            E.cx=match-row->chars;
+            E.rowoff=E.numrows;// be at the very top of the screen
+            break;
+        }
+    }  
+}
+
+/// @brief 查找字符串
+//传统搜索：用户输入完整关键词 → 按回车 → 执行搜索
+void editorFind(){
+    int save_cx=E.cx;
+    int save_cy=E.cy;
+    int save_coloff=E.coloff;
+    int save_rowoff=E.rowoff;
+    char* query=editorPrompt("Search: %s (Use ESC/Arrows/Enter)",editorFindCallback);
+    if(query){
+        free(query);
+    }else{
+        E.cx=save_cx;
+        E.cy=save_cy;
+        E.coloff=save_coloff;
+        E.rowoff=save_rowoff;
+    }
 }
 /// @brief 垂直滚动控制，rowoff为偏移量指向当前文件顶部行数，cy为屏幕绝对行数
 void editorScroll(){
@@ -432,10 +492,12 @@ int editorReadKey(){
         return c;
     }  
 }
-/// @brief 回显用户的键盘输入
-/// @param prompt 键盘输入
-/// @return 
-char* editorPrompt(char* prompt){
+
+/// @brief 回显键入的字符
+/// @param prompt 键入字符
+/// @param callback 回调函数处理
+/// @return 键入字符
+char* editorPrompt(char* prompt,void(*callback)(char*,int)){
     size_t buffsize=128;
     char* buf=malloc(buffsize);
     size_t buflen=0;
@@ -448,6 +510,7 @@ char* editorPrompt(char* prompt){
             if(buflen!=0)buf[--buflen]='\0';
         }else if(c=='\x1b'){
             editorSetStatusMessage("");
+            if(callback) callback(buf,c);
             free(buf);
             return NULL;
         }
@@ -455,6 +518,7 @@ char* editorPrompt(char* prompt){
             if (buflen!=0)
             {
                 editorSetStatusMessage("");
+                if(callback) callback(buf,c);
                 return buf;
             }
         } else if (!iscntrl(c)&&c<128)
@@ -467,6 +531,7 @@ char* editorPrompt(char* prompt){
                 buf[buflen++]=c;
                 buf[buflen]='\0';
             }
+            if(callback) callback(buf,c);
     }  
 }
 
@@ -593,6 +658,9 @@ void editorProcessKeyPress(){
         break;
     case CTRL_KEY('s'):
         editorSave();
+        break;
+    case CTRL_KEY('f'):
+        editorFind();
         break;
     case HOME_KEY:
         E.cx=0;
@@ -728,7 +796,7 @@ int main(int argc,char* argv[])
     if(argc>1){
         editorOpen(argv[1]);
     } 
-    editorSetStatusMessage("HELP:ctrl-s=save|ctrl-o=quit");
+    editorSetStatusMessage("HELP:ctrl-s=save|ctrl-o=quit|ctrl-f=find");
     while (1){
         editorRefreshScreen();
         editorProcessKeyPress();
