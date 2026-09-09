@@ -1,0 +1,4 @@
+/x1b[38;2;⟨r⟩;⟨g⟩;⟨b⟩m Select RGB foreground color 字体颜色
+/x1b[48;2;⟨r⟩;⟨g⟩;⟨b⟩m Select RGB background color 背景颜色
+
+蓝晶-----rgb（127,255,212）

@@ -30,12 +30,29 @@ typedef struct erow
     int rsize;//渲染的字符指针size
     char *chars;
     char *render;//实际渲染的字符指针 包含tab
+    unsigned char* hl;//heightlight length==rsize,keep every bits colors
 }erow;
 /*
 Backspace 键  发送 127 (DEL)
 Delete 键 发送转义序列 ESC [ 3 
 Ctrl+H 发送 8 (BS)
 */
+//定义颜色结构
+typedef struct 
+{
+    int r,g,b;
+    int is_rgb;
+    int ansi_code;
+}editorColor;
+//颜色常量
+#define COLOR_WHITE (editorColor){255,255,255,1,0}
+#define COLOR_TEXT    (editorColor){0, 0, 0, 0,39}
+#define COLOR_CYAN (editorColor){127,255,212,1,0}
+#define COLOR(r,g,b) (editorColor){r,g,b,1,0}
+//函数声明
+editorColor editorSyntaxToColor(int hl);
+int colorEquals(editorColor a, editorColor b);
+void colorToEscape(editorColor color, char* buf, int bufsize);
 enum editorKey{
     BACKSPACE = 127,    
     ARROW_LEFT=1000,
@@ -47,6 +64,10 @@ enum editorKey{
     END_KEY,
     PAGE_UP,
     PAGE_DOWN,
+};
+enum editorHightLight{
+    HL_NORMAL=0,
+    HL_NUMBER
 };
 
 struct editConfig
@@ -105,6 +126,8 @@ int editorRowCxToRx(erow *row ,int cx){
     }
     return rx;
 }
+/*function declare*/
+void editorUpdateSyntax(erow* row);
 /// @brief 处理tab用空格代替tab 将row chars中数据赋值在render
 /// @param row 文本信息
 void editorUpdateRow(erow* row){
@@ -129,6 +152,7 @@ void editorUpdateRow(erow* row){
     }
     row->render[idx]='\0';
     row->rsize=idx;
+    editorUpdateSyntax(row);
 }
 /// @brief 在指定的行索引处插入一行新的文本
 /// @param at 要插入的位置索引
@@ -144,6 +168,7 @@ void editorInsertRow(int at,char *s,size_t len){
     E.row[at].chars[len]='\0';
     E.row[at].render=NULL;
     E.row[at].rsize=0;
+    E.row[at].hl=NULL;
     editorUpdateRow(&E.row[at]);
     E.numrows++;
     E.dirty++;
@@ -156,6 +181,7 @@ void editorInsertRow(int at,char *s,size_t len){
 void editorFreeRow(erow* erow){
     free(erow->render);
     free(erow->chars);
+    free(erow->hl);
 }
 /// @brief deleting a empty row!
 /// @param at row at position
@@ -577,15 +603,28 @@ void editorDrawRows(struct abuf *ab) {
         abAppend(ab, "~", 1);
         }
     }else{
-        int len=E.row[filerow].rsize-E.coloff;
-        if(len<0)len=0;
-        if(len>E.screencols) len=E.screencols;
-        abAppend(ab,&E.row[filerow].render[E.coloff],len);
+        int len = E.row[filerow].rsize - E.coloff;
+        if (len < 0) len = 0;
+        if (len > E.screencols) len = E.screencols;
+        char* c = &E.row[filerow].render[E.coloff];
+        unsigned char* hl = &E.row[filerow].hl[E.coloff];
+        editorColor current_color = COLOR_TEXT;  // 初始化当前颜色为文本默认颜色
+        for (int j = 0; j < len; j++) {
+        // 2. 获取当前字符应有的颜色（无论是 NORMAL, NUMBER 还是未来的 KEYWORD）
+        editorColor new_color = editorSyntaxToColor(hl[j]);
+        // 3. 核心优化：只在颜色真正改变时，才输出转义序列
+        if (!colorEquals(new_color, current_color)) {
+            char buf[32];
+            colorToEscape(new_color, buf, sizeof(buf));
+            abAppend(ab, buf, strlen(buf));  // 注意是 strlen
+            current_color = new_color;       // 更新状态
+            }
+        abAppend(ab, &c[j], 1);// 4. 输出当前字符
+        }
+        abAppend(ab, "\x1b[39m", 5);// 5. 行末统一重置为终端默认颜色
     }  
-    abAppend(ab, "\x1b[K", 3);
-    //if (y < E.screenrows - 1) {最后一行显示状态
-      abAppend(ab, "\r\n", 2);
-    //}
+    abAppend(ab, "\x1b[K", 3);// 清除从光标到行尾的内容（防止上一行长内容残留）
+    abAppend(ab, "\r\n", 2);    // 换行
   }
 }
 /// @brief 绘制导航栏
@@ -633,9 +672,59 @@ int getWindowSize(int* rows,int* cols ){
         *cols=ws.ws_col;
         *rows=ws.ws_row;
         return 0;
-    }
-    
+    } 
 }
+
+/*syntax highlighting*/
+
+/**
+ * @brief 更新行的语法高亮信息
+ * @param row 指向要更新语法高亮的 erow 结构体的指针
+ */
+void editorUpdateSyntax(erow* row){
+    row->hl =realloc(row->hl,row->rsize);
+    memset(row->hl,HL_NORMAL,row->rsize);
+    int i;
+    for ( i = 0; i < row->rsize; i++)
+    {
+        if(isdigit(row->render[i])){
+            row->hl[i]=HL_NUMBER;
+        }
+    }
+}
+/// @brief 获取颜色
+/// @param hl 
+/// @return 颜色结构体
+editorColor editorSyntaxToColor(int hl) {
+    switch (hl) {
+        case HL_NORMAL:  return COLOR_TEXT;
+        case HL_NUMBER:  return COLOR_CYAN;
+        default:         return COLOR_TEXT;
+    }
+}
+/// @brief  判断颜色是否相等
+/// @param a 
+/// @param b 
+/// @return 
+int colorEquals(editorColor a, editorColor b) {
+    if (a.is_rgb != b.is_rgb) return 0;
+    if (a.is_rgb) {
+        return a.r == b.r && a.g == b.g && a.b == b.b;
+    }
+    return a.ansi_code == b.ansi_code;
+}
+/// @brief 生成转义序列
+/// @param color 
+/// @param buf 
+/// @param bufsize 
+void colorToEscape(editorColor color, char* buf, int bufsize) {
+    if (color.is_rgb) {
+        snprintf(buf, bufsize, "\x1b[38;2;%d;%d;%dm", color.r, color.g, color.b);
+    } else {
+        snprintf(buf, bufsize, "\x1b[%dm", color.ansi_code);
+    }
+}
+/* color end */
 void editorProcessKeyPress(){
     static int quit_times=KILO_QUIT_TIMES;//程序运行期间，这行代码只执行一次。
     int c=editorReadKey();//quit_times 不会销毁，它静静地待在内存的静态区，保留着当前的值。
