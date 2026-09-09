@@ -67,7 +67,8 @@ enum editorKey{
 };
 enum editorHightLight{
     HL_NORMAL=0,
-    HL_NUMBER
+    HL_NUMBER,
+    HL_MATCH
 };
 
 struct editConfig
@@ -354,6 +355,14 @@ void editorSave(){
 void editorFindCallback(char* query,int key){
     static int last_match=-1;//记录上次匹配的位置
     static int diretion=1;//1---forward -1 backward
+    static int saved_hl_line;//存储被搜索高亮的那一行的行号
+    static char* saved_hl=NULL;//不为 NULL 时，指向保存的原始高亮数据
+    if(saved_hl){
+        erow* row=&E.row[saved_hl_line];
+        memcpy(row->hl,saved_hl,row->rsize);
+        free(saved_hl);
+        saved_hl=NULL;
+    }
     if(key=='\r'||key=='\x1b'){
         last_match=-1;
         diretion=1;
@@ -381,6 +390,11 @@ void editorFindCallback(char* query,int key){
             E.cy=current;
             E.cx=match-row->chars;
             E.rowoff=E.numrows;// be at the very top of the screen
+            saved_hl_line=current;
+            saved_hl=malloc(row->rsize);
+            memcpy(saved_hl,row->hl,row->rsize);
+            memset(&row->hl[match-row->chars],HL_MATCH,strlen(query));
+            //match-row->chars:匹配文本在行中的索引偏移量
             break;
         }
     }  
@@ -699,6 +713,7 @@ editorColor editorSyntaxToColor(int hl) {
     switch (hl) {
         case HL_NORMAL:  return COLOR_TEXT;
         case HL_NUMBER:  return COLOR_CYAN;
+        case HL_MATCH:   return COLOR(100,149,237);
         default:         return COLOR_TEXT;
     }
 }
