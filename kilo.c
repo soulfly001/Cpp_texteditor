@@ -495,11 +495,17 @@ void editorSetStatusMessage(const char*fmt,...){
 }
 void disenableRawMode()
 {
+    if (!isatty(STDIN_FILENO)) return;
     if(tcsetattr(STDIN_FILENO, TCSAFLUSH, &E.orig_termios)==-1)
     die("tcsetattr");
 }
 void enableRawMode()
 {
+     // 检查是否是终端设备
+    if (!isatty(STDIN_FILENO)) {
+        // 非终端环境，跳过终端设置
+        return;
+    }
     if (tcgetattr(STDIN_FILENO, &E.orig_termios) == -1) die("tcgetattr");
     //get keyborad property into struct
     atexit(disenableRawMode);// exit call disenableRawMode
@@ -720,6 +726,13 @@ void editorDrawMessageBar(struct abuf *ab){
 }
 
 int getWindowSize(int* rows,int* cols ){
+    // 添加非终端环境检查
+    if (!isatty(STDIN_FILENO)) {
+        // 非终端环境，使用默认值
+        *rows = 24;  // 默认行数
+        *cols = 80;  // 默认列数
+        return 0;
+    }
     struct winsize ws;
     if(ioctl(STDIN_FILENO,TIOCGWINSZ,&ws)==-1 || ws.ws_col==0) {
         if(write(STDOUT_FILENO, "\x1b[999C\x1b[999B",12)!=12) return -1; 
@@ -809,7 +822,7 @@ void editorUpdateSyntax(erow* row){
             }
         }
         /*关键字高亮处理逻辑*/
-        
+
         if(prev_sep)
         {
             int j;
