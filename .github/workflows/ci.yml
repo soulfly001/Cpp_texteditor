@@ -23,5 +23,5 @@ jobs:
 
     - name: Run basic test
       run: |
-        echo "int main() { return 0; }" > test.c
-        timeout 2s ./kilo test.c < /dev/null || true
+        chmod +x test.sh
+        ./test.sh
