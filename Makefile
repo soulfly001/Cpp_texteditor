@@ -6,5 +6,5 @@ CFLAGS = -Wall -Wextra -pedantic -std=c99
 all: demo kilo
 demo: demo.c
 	$(CC) $(CFLAGS) demo.c -o demo
-kilo: kilo.C
+kilo: kilo.c
 	$(CC) $(CFLAGS) kilo.c -o kilo
