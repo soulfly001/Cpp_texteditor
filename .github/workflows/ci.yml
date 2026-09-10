@@ -18,8 +18,9 @@ jobs:
 
     - name: Compile Kilo
       run: make kilo
-      # 如果没有 Makefile，使用：
-      # run: gcc -Wall -Wextra -pedantic -std=c99 kilo.c -o kilo
+
+    - name: Add execute permission
+      run: chmod +x kilo
 
     - name: Run basic test
       run: |
