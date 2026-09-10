@@ -23,7 +23,19 @@ void editorMoveCursor(int  key);
 void editorRefreshScreen();
 void editorSetStatusMessage(const char* fmt,...);
 char *editorPrompt(char *prompt, void (*callback)(char *, int));
+void editorSelectSyntaxHighLight();
 /*             data        */
+
+
+/// @brief 定义一种文件类型的语法高亮配置
+struct editorSyntax
+{
+    char* filetype;
+    char** filematch;
+    char* singleline_comment_start;
+    int flags;
+};
+
 typedef struct erow
 {
     int size;
@@ -67,13 +79,17 @@ enum editorKey{
 };
 enum editorHightLight{
     HL_NORMAL=0,
+    HL_COMMENT,//single line 
+    HL_STRING,
     HL_NUMBER,
     HL_MATCH
 };
-
+#define HL_HIGHLIGHT_NUMBER (1<<0)//1左移1bit 第0位：高亮数字
+#define HL_HIGHLIGHT_STRING  (1<<1)//第1位：高亮string
 struct editConfig
 {
     struct termios orig_termios;
+    struct editorSyntax* syntax;
     int screenrows;
     int screencols;
     int numrows;
@@ -88,7 +104,18 @@ struct editConfig
     int cx,cy;//cursor position cx光标在字符数组中的逻辑索引/下标
 };
 struct editConfig E;
-
+/********file  types*********/
+char* C_HL_extensions[]={".c",".h",".cpp",NULL};
+struct editorSyntax HLDB[]=
+{
+   {
+        "c",
+        C_HL_extensions,
+        "//",
+        HL_HIGHLIGHT_NUMBER|HL_HIGHLIGHT_STRING
+   },
+};
+#define HLDB_ENTRIES (sizeof(HLDB)/sizeof(HLDB[0]))
 struct abuf
 {
    char* b;
@@ -128,6 +155,8 @@ int editorRowCxToRx(erow *row ,int cx){
     return rx;
 }
 /*function declare*/
+
+
 void editorUpdateSyntax(erow* row);
 /// @brief 处理tab用空格代替tab 将row chars中数据赋值在render
 /// @param row 文本信息
@@ -277,6 +306,7 @@ void editorDelChar(){
 void editorOpen(char* filename){
     free(E.filename);
     E.filename=strdup(filename);
+    editorSelectSyntaxHighLight();
     FILE* fp=fopen(filename,"r");
     if(!fp)die("fopen");
     char* line=NULL;
@@ -321,6 +351,7 @@ void editorSave(){
             editorSetStatusMessage("save aborted");
             return;
         }
+        editorSelectSyntaxHighLight();
     }
     int len;
     char* buf=editorRowsToString(&len); 
@@ -648,7 +679,8 @@ void editorDrawStatusBar(struct abuf* ab){
     char status[80],rstatus[80];
     int len=snprintf(status,sizeof(status),"%.20s-%d lines %s",
         E.filename?E.filename:"[NO NAME]",E.numrows,E.dirty?"(modified)":"");
-    int rlen=snprintf(rstatus,sizeof(rstatus),"%d/%d",E.cy+1,E.numrows);
+    int rlen=snprintf(rstatus,sizeof(rstatus),"%s|%d/%d",
+            E.syntax?E.syntax->filetype:"no filetype",E.cy+1,E.numrows);
     if(len>E.screencols) len=E.screencols;
     abAppend(ab,status,len);
     while (len<E.screencols)
@@ -691,6 +723,13 @@ int getWindowSize(int* rows,int* cols ){
 
 /*syntax highlighting*/
 
+/// @brief 字符是否被视为分隔符
+/// @param c 字符
+/// @return 
+int is_separator(int c){
+    return isspace(c)||c=='\0'||strchr(",.()+-/*=~%<>[];",c)!=NULL;
+}
+
 /**
  * @brief 更新行的语法高亮信息
  * @param row 指向要更新语法高亮的 erow 结构体的指针
@@ -698,20 +737,78 @@ int getWindowSize(int* rows,int* cols ){
 void editorUpdateSyntax(erow* row){
     row->hl =realloc(row->hl,row->rsize);
     memset(row->hl,HL_NORMAL,row->rsize);
-    int i;
-    for ( i = 0; i < row->rsize; i++)
+    if(E.syntax==NULL) return;
+    char* scs=E.syntax->singleline_comment_start;
+    int scs_len=scs?strlen(scs):0;
+    int prev_sep=1;//判断前一个字符是否是分隔符
+    int in_string=0;
+    int i=0;
+    while (i<row->rsize)//使用while可以手动控制
     {
-        if(isdigit(row->render[i])){
-            row->hl[i]=HL_NUMBER;
+        char c=row->render[i];
+        unsigned char prev_hl=(i>0)?row->hl[i-1]:HL_NORMAL;//小数点前后高亮
+        /*single-comment高亮处理逻辑*/
+        if(scs_len&&!in_string)
+        {
+            if(!strncmp(&row->render[i],scs,scs_len))//匹配成功返回0
+            {
+                memset(&row->hl[i],HL_COMMENT,row->rsize-i);
+                break;
+            }
         }
+        /*string高亮处理逻辑*/
+        if(E.syntax->flags&HL_HIGHLIGHT_STRING)
+        {
+            if(in_string)
+            {
+                row->hl[i]=HL_STRING;
+                if(c=='\\'&&i+1<row->rsize)//处理转义‘\’
+                {
+                    i++;
+                    row->hl[i]=HL_STRING;
+                    i++;
+                    continue;
+                }
+                if(c==in_string) in_string=0;
+                i++;
+                prev_sep=1;
+                continue;
+            }
+            else
+            {
+                if (c == '"' || c == '\'')
+                {
+                    in_string=c;
+                    row->hl[i]=HL_STRING;
+                    i++;
+                    continue;
+                }
+            }
+        }
+        /*数字高亮处理逻辑*/
+        if(E.syntax->flags&HL_HIGHLIGHT_NUMBER)
+        {
+            if((isdigit(c) && (prev_sep||prev_hl==HL_NUMBER))||(c=='.'&& prev_hl==HL_NUMBER))
+            {
+                row->hl[i]=HL_NUMBER;
+                i++;
+                prev_sep=0;
+                continue;
+            }
+        }
+        prev_sep=is_separator(c);
+        i++;
     }
 }
+
 /// @brief 获取颜色
 /// @param hl 
 /// @return 颜色结构体
 editorColor editorSyntaxToColor(int hl) {
     switch (hl) {
         case HL_NORMAL:  return COLOR_TEXT;
+        case HL_COMMENT: return COLOR(250, 235, 215);
+        case HL_STRING:  return COLOR(161, 191, 105);
         case HL_NUMBER:  return COLOR_CYAN;
         case HL_MATCH:   return COLOR(100,149,237);
         default:         return COLOR_TEXT;
@@ -737,6 +834,44 @@ void colorToEscape(editorColor color, char* buf, int bufsize) {
         snprintf(buf, bufsize, "\x1b[38;2;%d;%d;%dm", color.r, color.g, color.b);
     } else {
         snprintf(buf, bufsize, "\x1b[%dm", color.ansi_code);
+    }
+}
+/*
+@brief 根据当前文件名自动检测并设置语法高亮规则。
+@details 该函数通过遍历全局语法高亮数据库 (HLDB)，尝试为当前打开的文件 (E.filename) 
+ *  匹配最合适的语法定义。匹配策略分为两种：
+ *  1. 扩展名精确匹配：若匹配模式以 '.' 开头（如 ".c", ".h"），则提取文件扩展名 
+ *     并与模式进行精确比较 (strcmp)，避免 ".cpp" 被误匹配为 ".c"。
+ *  2. 文件名包含匹配：若匹配模式不以 '.' 开头（如 "Makefile", "CMakeLists"），
+ *     则检查完整文件路径/名称中是否包含该子串 (strstr)。
+ *  一旦找到首个匹配项，即将对应的语法规则指针赋值给 E.syntax 并立即返回。
+
+*/
+void editorSelectSyntaxHighLight()
+{
+    E.syntax=NULL;
+    if(E.filename==NULL) return;
+    char* ext=strrchr(E.filename,'.');
+    for (unsigned int i = 0; i < HLDB_ENTRIES; i++)
+    {
+        struct editorSyntax* s=&HLDB[i];
+        unsigned int j=0;
+        while (s->filematch[j])
+        {
+            int is_dot=(s->filematch[j][0]=='.');//[.c,.cpp,.h,null]
+            // 1. dot 开头(扩展名匹配)
+            // 2. 不以 . 开头(文件名包含匹配)
+            if((is_dot&&ext&&!strcmp(ext,s->filematch[j]))||
+               (!is_dot && strstr(E.filename, s->filematch[j])))
+            {
+                E.syntax=s;
+                for (int filerow = 0; filerow < E.numrows; filerow++)
+                {
+                    editorUpdateSyntax(&E.row[filerow]);
+                } 
+            }
+            j++;
+        }  
     }
 }
 /* color end */
@@ -847,6 +982,7 @@ void initEditor(){
     E.statusmsg[0]='\0';
     E.statusmsg_time=0;
     E.dirty=0;
+    E.syntax=NULL;
     if(getWindowSize(&E.screenrows,&E.screencols)==-1) die("getWindowSize");
     E.screenrows-=2;
 }

@@ -53,7 +53,7 @@ gcc -o kilo kilo.c -Wall -Wextra -std=c99
 
 ```
 .
-├── kilo.c      # 主体源码（约 700 行）
+├── kilo.c      # 主体源码
 ├── kilo        # 编译后的可执行文件
 ├── color.txt   # 颜色配置参考（RGB 高亮色值）
 ├── demo.c      # 测试代码
