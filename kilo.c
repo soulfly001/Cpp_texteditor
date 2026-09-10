@@ -809,6 +809,7 @@ void editorUpdateSyntax(erow* row){
             }
         }
         /*关键字高亮处理逻辑*/
+        
         if(prev_sep)
         {
             int j;
