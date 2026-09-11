@@ -103,6 +103,7 @@ struct editConfig
     char* filename;
     char statusmsg[80];
     time_t statusmsg_time;
+    int row_capacity;// 【新增】记录当前分配的行数组容量
     int dirty; // file modify and no save bit
     int cx,cy;//cursor position cx光标在字符数组中的逻辑索引/下标
 };
@@ -317,20 +318,44 @@ void editorDelChar(){
 void editorOpen(char* filename){
     free(E.filename);
     E.filename=strdup(filename);
-    editorSelectSyntaxHighLight();
-    FILE* fp=fopen(filename,"r");
+    editorSelectSyntaxHighLight(); // 这里只设置 E.syntax，不会触发全量更新，因为 E.numrows 还是 0
+    FILE* fp=fopen(filename, "r");
     if(!fp)die("fopen");
+    
     char* line=NULL;
     size_t linecap=0;
     ssize_t linelen;
-    while ((linelen=getline(&line,&linecap,fp))!=-1)
-    {
-        while (linelen>0 && (line[linelen-1]=='\n'||line[linelen-1]=='\r'))
-        { linelen--;}
-        editorInsertRow(E.numrows,line,linelen);
+    
+    while ((linelen=getline(&line, &linecap,fp))!=-1) {
+        while (linelen >0 && (line[linelen-1]=='\n'||line[linelen-1]=='\r')) {
+            linelen--;
+        }
+        
+        if (E.numrows == E.row_capacity) {
+            E.row_capacity = E.row_capacity == 0 ? 16 : E.row_capacity * 2;
+            E.row = realloc(E.row, sizeof(erow) * E.row_capacity);
+            if (!E.row) die("realloc");
+        }
+        
+        erow *row = &E.row[E.numrows];
+        row->size = linelen;
+        row->chars = malloc(linelen + 1);
+        if (!row->chars) die("malloc");
+        memcpy(row->chars, line, linelen);
+        row->chars[linelen] = '\0';
+        
+        // 【关键】保持为 NULL，标记为“未渲染”
+        row->render = NULL;
+        row->rsize = 0;
+        row->hl = NULL;
+        
+        E.numrows++;
     }
     free(line);
-    fclose(fp); 
+    fclose(fp);
+    
+    // 【删除了原来的 for 循环】加载时不再进行任何语法高亮计算！
+    
     E.dirty=0;
 }
 /// @brief 将 erow 结构数组转换为一个字符串
@@ -647,54 +672,58 @@ int getCursorPosition(int* rows, int* cols){
     //editorReadKey();
     return 0;
 }
-void editorDrawRows(struct abuf *ab) {
-  int y;
-  for (y = 0; y < E.screenrows; y++) {
-    // //行号显示
-    // char rowNumber[16];
-    // int rnLen = snprintf(rowNumber, sizeof(rowNumber), "%3d ", y+E.rowoff+ 1);
-    // abAppend(ab, rowNumber, rnLen);//行号显示占位 计算rowcol需要减
-    int filerow=y+E.rowoff;//absulte postion
-    if(filerow>=E.numrows){
-        if (E.numrows==0 && y == E.screenrows / 3) {
-        char welcome[80];
-        int welcomelen = snprintf(welcome, sizeof(welcome),
-            "Kilo editor -- version %s", KILO_VERSION);
-        if (welcomelen > E.screencols) welcomelen = E.screencols;
-        int padding = (E.screencols - welcomelen) / 2;
-        if (padding) {
-            abAppend(ab, "~", 1);
-            padding--;
-        }
-        while (padding--) abAppend(ab, " ", 1);
-        abAppend(ab, welcome, welcomelen);
-        } else {
-        abAppend(ab, "~", 1);
-        }
-    }else{
-        int len = E.row[filerow].rsize - E.coloff;
-        if (len < 0) len = 0;
-        if (len > E.screencols) len = E.screencols;
-        char* c = &E.row[filerow].render[E.coloff];
-        unsigned char* hl = &E.row[filerow].hl[E.coloff];
-        editorColor current_color = COLOR_TEXT;  // 初始化当前颜色为文本默认颜色
-        for (int j = 0; j < len; j++) {
-        // 2. 获取当前字符应有的颜色（无论是 NORMAL, NUMBER 还是未来的 KEYWORD）
-        editorColor new_color = editorSyntaxToColor(hl[j]);
-        // 3. 核心优化：只在颜色真正改变时，才输出转义序列
-        if (!colorEquals(new_color, current_color)) {
-            char buf[32];
-            colorToEscape(new_color, buf, sizeof(buf));
-            abAppend(ab, buf, strlen(buf));  // 注意是 strlen
-            current_color = new_color;       // 更新状态
+void editorDrawRows(struct abuf* ab) {
+    int y;
+    for (y = 0; y < E.screenrows; y++) {
+        int filerow = y + E.rowoff; // 绝对行号
+        
+        if (filerow >= E.numrows) {
+            if (E.numrows == 0 && y == E.screenrows / 3) {
+                char welcome[80];
+                int welcomelen = snprintf(welcome, sizeof(welcome),
+                    "Kilo editor -- version %s", KILO_VERSION);
+                if (welcomelen > E.screencols) welcomelen = E.screencols;
+                int padding = (E.screencols - welcomelen) / 2;
+                if (padding) {
+                    abAppend(ab, "~", 1);
+                    padding--;
+                }
+                while (padding--) abAppend(ab, " ", 1);
+                abAppend(ab, welcome, welcomelen);
+            } else {
+                abAppend(ab, "~", 1);
             }
-        abAppend(ab, &c[j], 1);// 4. 输出当前字符
-        }
-        abAppend(ab, "\x1b[39m", 5);// 5. 行末统一重置为终端默认颜色
-    }  
-    abAppend(ab, "\x1b[K", 3);// 清除从光标到行尾的内容（防止上一行长内容残留）
-    abAppend(ab, "\r\n", 2);    // 换行
-  }
+        } else {
+            // 【终极优化：懒加载】
+            erow *row = &E.row[filerow];
+            if (row->render == NULL) {
+                // 只有当这一行需要被画到屏幕上，且还没被渲染过时，才计算高亮
+                editorUpdateRow(row);
+            }
+            
+            int len = row->rsize - E.coloff;
+            if (len < 0) len = 0;
+            if (len > E.screencols) len = E.screencols;
+            
+            char *c = &row->render[E.coloff];
+            unsigned char *hl = &row->hl[E.coloff];
+            editorColor current_color = COLOR_TEXT;
+            
+            for (int j = 0; j < len; j++) {
+                editorColor new_color = editorSyntaxToColor(hl[j]);
+                if (!colorEquals(new_color, current_color)) {
+                    char buf[32];
+                    colorToEscape(new_color, buf, sizeof(buf));
+                    abAppend(ab, buf, strlen(buf));
+                    current_color = new_color;
+                }
+                abAppend(ab, &c[j], 1);
+            }
+            abAppend(ab, "\x1b[39m", 5);
+        } 
+        abAppend(ab, "\x1b[K", 3);
+        abAppend(ab, "\r\n", 2);
+    }
 }
 /// @brief 绘制导航栏
 /// @param ab 缓存对象
@@ -1041,6 +1070,7 @@ void initEditor(){
     E.statusmsg_time=0;
     E.dirty=0;
     E.syntax=NULL;
+    E.row_capacity = 0; // 【新增】初始容量为 0
     if(getWindowSize(&E.screenrows,&E.screencols)==-1) die("getWindowSize");
     E.screenrows-=2;
 }
@@ -1087,28 +1117,66 @@ void editorMoveCursor(int key){
     }
 
 }
-int main(int argc,char* argv[])
-{
-    enableRawMode();
+int main(int argc, char* argv[]) {
+    int benchmark_mode = 0;
+    int file_arg_index = 1;
+
+    // 1. 检测是否带有 --benchmark 参数
+    if (argc > 1 && strcmp(argv[1], "--benchmark") == 0) {
+        benchmark_mode = 1;
+        file_arg_index = 2;
+    }
+
+    // 2. 非 benchmark 模式下才初始化终端 Raw Mode
+    if (!benchmark_mode) {
+        enableRawMode();
+    }
+    
     initEditor();
-    if(argc>1){
-        editorOpen(argv[1]);
-    } 
-    editorSetStatusMessage("HELP:ctrl-s=save|ctrl-o=quit|ctrl-f=find");
-    while (1){
-        editorRefreshScreen();
-        editorProcessKeyPress();
-        /*
-        char c='\0';//read 1 byte from the standard input into the variable c//q is quit
-        if(read(STDIN_FILENO,&c,1)==-1 && errno !=EAGAIN ) die("read");
-        //read(STDIN_FILENO, &c, 1);
-        if(iscntrl(c)){ //tests whether a character is a control character. 
-            printf("%d\r\n",c);
-        }else{
-             printf("%d('%c')\r\n",c,c);//escape sequence
+
+    // 3. 如果有传入文件参数
+    if (argc > file_arg_index) {
+        struct timespec start, end;
+        
+        // 开始高精度计时
+        clock_gettime(CLOCK_MONOTONIC, &start);
+        
+        // 执行文件加载
+        editorOpen(argv[file_arg_index]);
+        
+        // 结束计时
+        clock_gettime(CLOCK_MONOTONIC, &end);
+        
+        // 如果是 benchmark 模式，打印结果并退出
+        if (benchmark_mode) {
+            double time_taken_ms = (end.tv_sec - start.tv_sec) * 1000.0;
+            time_taken_ms += (end.tv_nsec - start.tv_nsec) / 1000000.0;
+            
+            printf("[Benchmark] File '%s' loaded in %.3f ms (%d rows)\n", 
+                   argv[file_arg_index], time_taken_ms, E.numrows);
+            
+            // 清理内存并退出
+            for (int i = 0; i < E.numrows; i++) editorFreeRow(&E.row[i]);
+            free(E.row);
+            free(E.filename);
+            return 0;
+        } else {
+            // 正常模式：进入编辑器主循环
+            editorSetStatusMessage("HELP:ctrl-s=save|ctrl-o=quit|ctrl-f=find");
+            while (1) {
+                editorRefreshScreen();
+                editorProcessKeyPress();
+            }
         }
-        if(CTRL_KEY('z')==c) break; //realize the ctrl+a exit*/
-    };  
-                                
+    } else {
+        // 没有传入文件，正常进入编辑器
+        if (!benchmark_mode) {
+            editorSetStatusMessage("HELP:ctrl-s=save|ctrl-o=quit|ctrl-f=find");
+            while (1) {
+                editorRefreshScreen();
+                editorProcessKeyPress();
+            }
+        }
+    }
     return 0;
 }
