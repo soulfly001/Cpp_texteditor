@@ -3,8 +3,15 @@
 #-Wextra 和 -pedantic 会触发更多警告。
 CC = gcc
 CFLAGS = -Wall -Wextra -pedantic -std=c99
-all: demo kilo
+all:kilo
 demo: demo.c
 	$(CC) $(CFLAGS) demo.c -o demo
 kilo: kilo.c
 	$(CC) $(CFLAGS) kilo.c -o kilo
+
+# 清理编译产物
+clean:
+	rm -f kilo
+
+# 方便命令
+.PHONY: all clean

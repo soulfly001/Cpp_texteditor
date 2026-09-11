@@ -7,22 +7,37 @@ on:
     branches: [ "main", "master" ]
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        compiler: [gcc, clang]
 
     steps:
     - uses: actions/checkout@v3
 
     - name: Install dependencies
-      run: sudo apt-get update && sudo apt-get install -y build-essential
+      run: sudo apt-get update && sudo apt-get install -y build-essential cppcheck
 
-    - name: Compile Kilo
-      run: make kilo
+    - name: Set compiler
+      run: echo "CC=${{ matrix.compiler }}" >> $GITHUB_ENV
 
-    - name: Add execute permission
-      run: chmod +x kilo
+    - name: Compile with strict warnings
+      run: make clean && make
 
-    - name: Run basic test
+    - name: Run static analysis (Cppcheck)
+      if: matrix.compiler == 'gcc'
+      run: cppcheck --error-exitcode=1 --enable=warning,performance,portability --std=c99 kilo.c
+
+    - name: Run comprehensive tests
       run: |
         chmod +x test.sh
         ./test.sh
+
+    - name: Compile with AddressSanitizer
+      run: |
+        make clean
+        make CFLAGS="-Wall -Wextra -pedantic -std=c99 -fsanitize=address -g" LDFLAGS="-fsanitize=address"
+
+    - name: Run tests with memory check
+      run: ./test.sh
