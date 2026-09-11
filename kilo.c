@@ -613,8 +613,15 @@ char* editorPrompt(char* prompt,void(*callback)(char*,int)){
             {
                 if (buflen==buffsize-1)
                 {
-                    buffsize*=2;
-                    buf=realloc(buf,buffsize);
+                    buffsize *= 2;
+                    char* new_buf = realloc(buf, buffsize);
+                    if (new_buf == NULL) 
+                    {
+                        free(buf);  // 释放原来的内存
+                        editorSetStatusMessage("Memory allocation failed");
+                        return NULL;
+                    }
+                    buf = new_buf;
                 }
                 buf[buflen++]=c;
                 buf[buflen]='\0';
