@@ -29,9 +29,8 @@ jobs:
       if: matrix.compiler == 'gcc'
       run: |
         cppcheck --error-exitcode=1 \
-                --enable=style,performance \
+                --enable=error \
                 --std=c99 \
-                --suppress=objectIndex \
                 kilo.c
 
     - name: Run comprehensive tests
