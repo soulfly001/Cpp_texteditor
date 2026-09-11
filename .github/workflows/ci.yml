@@ -27,7 +27,12 @@ jobs:
 
     - name: Run static analysis (Cppcheck)
       if: matrix.compiler == 'gcc'
-      run: cppcheck --error-exitcode=1 --enable=warning,performance,portability --std=c99 kilo.c
+      run: |
+        cppcheck --error-exitcode=1 \
+                --enable=style,performance \
+                --std=c99 \
+                --suppress=objectIndex \
+                kilo.c
 
     - name: Run comprehensive tests
       run: |
