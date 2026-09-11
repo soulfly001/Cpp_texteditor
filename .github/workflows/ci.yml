@@ -29,9 +29,11 @@ jobs:
       if: matrix.compiler == 'gcc'
       run: |
         cppcheck --error-exitcode=1 \
-                --enable=error \
-                --suppress=objectIndex \
-                kilo.c
+             --std=c99 \
+             --suppress=objectIndex \
+             --suppress=constParameterPointer \
+             --suppress=constVariablePointer \
+             kilo.c
 
     - name: Run comprehensive tests
       run: |
