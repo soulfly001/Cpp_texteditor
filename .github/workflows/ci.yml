@@ -2,9 +2,9 @@ name: Kilo CI
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master","perf" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master","perf" ]
 
 jobs:
   build-and-test:
