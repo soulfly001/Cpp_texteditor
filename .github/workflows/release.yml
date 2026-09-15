@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送 v 开头的标签时触发（如 v1.0.0）
+permissions:
+  contents: write  # 允许创建 Release
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      
+      - name: Compile kilo
+        run: make clean && make
+      
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: kilo
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
