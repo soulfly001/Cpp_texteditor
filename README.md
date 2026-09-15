@@ -1,4 +1,6 @@
 # Kilo — 极简终端文本编辑器
+[![Kilo CI](https://github.com/soulfly001/kilo/actions/workflows/ci.yml/badge.svg)](https://github.com/soulfly001/kilo/actions/workflows/ci.yml)
+[![Release](https://github.com/soulfly001/kilo/actions/workflows/release.yml/badge.svg)](https://github.com/soulfly001/kilo/actions/workflows/release.yml)
 
 一个用纯 C 编写的轻量级终端文本编辑器，单文件、零依赖
 ---
@@ -52,14 +54,18 @@ gcc -o kilo kilo.c -Wall -Wextra -std=c99
 
 ```
 .
-├── kilo.c      # 主体源码
-├── kilo        # 编译后的可执行文件
-├── color.txt   # 颜色配置参考（RGB 高亮色值）
-├── demo.c      # 测试代码
-├── demo        # 测试可执行文件
-├── text.txt    # 测试文本
-├── Makefile    # 编译脚本
-└── README.md   # 本文件
+├── kilo.c              # 主体源码
+├── kilo                # 编译后的可执行文件
+├── color.txt           # 颜色配置参考（RGB 高亮色值）
+├── demo.c              # 测试代码
+├── demo                # 测试可执行文件
+├── text.txt            # 测试文本
+├── Makefile            # 编译脚本
+├── test.sh             # 自动化测试脚本
+├── .github/workflows/  # CI/CD 配置文件
+│   ├── ci.yml          # 持续集成配置
+│   ── release.yml     # 持续部署配置
+── README.md           # 本文件
 ```
 
 ---
