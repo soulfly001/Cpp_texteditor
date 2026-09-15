@@ -4,7 +4,8 @@ on:
   push:
     tags:
       - 'v*'  # 当推送 v 开头的标签时触发（如 v1.0.0）
-
+permissions:
+  contents: write  # 允许创建 Release
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
