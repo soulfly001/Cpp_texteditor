@@ -1,6 +1,6 @@
 # Kilo — 极简终端文本编辑器
-[![Kilo CI](https://github.com/soulfly001/kilo/actions/workflows/ci.yml/badge.svg)](https://github.com/soulfly001/kilo/actions/workflows/ci.yml)
-[![Release](https://github.com/soulfly001/kilo/actions/workflows/release.yml/badge.svg)](https://github.com/soulfly001/kilo/actions/workflows/release.yml)
+[![Kilo CI](https://github.com/soulfly001/Cpp_texteditor/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/soulfly001/Cpp_texteditor/actions/workflows/ci.yml)
+[![Release](https://github.com/soulfly001/Cpp_texteditor/actions/workflows/release.yml/badge.svg)](https://github.com/soulfly001/Cpp_texteditor/actions/workflows/release.yml)
 
 一个用纯 C 编写的轻量级终端文本编辑器，单文件、零依赖
 ---
